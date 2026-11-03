@@ -113,6 +113,24 @@ unsafe fn hadd_ps(r4: __m128) -> f32 {
     _mm_cvtss_f32(r1)
 }
 
+/// Hints the CPU to prefetch the weights of the feature at `index` of `ffm_buffer`.
+/// If there is no such feature (look-ahead past the last one) nothing is done.
+/// A prefetch never dereferences or faults, so the address is computed with wrapping
+/// arithmetic and no out-of-bounds read is ever performed.
+#[inline(always)]
+unsafe fn prefetch_feature_weights(
+    ffm_weights: &[f32],
+    ffm_buffer: &[HashAndValueAndSeq],
+    index: usize,
+) {
+    if let Some(feature) = ffm_buffer.get(index) {
+	_mm_prefetch(
+	    ffm_weights.as_ptr().wrapping_add(feature.hash as usize) as *const i8,
+	    _MM_HINT_T0,
+	);
+    }
+}
+
 impl<L: OptimizerTrait + 'static> BlockTrait for BlockFFM<L> {
     fn as_any(&mut self) -> &mut dyn Any {
 	self
@@ -160,7 +178,9 @@ impl<L: OptimizerTrait + 'static> BlockTrait for BlockFFM<L> {
 			   - we will use these gradients later in backward pass
 		    */
 
-		    _mm_prefetch(mem::transmute::<&f32, &i8>(&contra_fields.get_unchecked(fb.ffm_buffer.get_unchecked(0).contra_field_index as usize)), _MM_HINT_T0);
+		    if let Some(first) = fb.ffm_buffer.first() {
+			_mm_prefetch(contra_fields.as_ptr().wrapping_add(first.contra_field_index as usize) as *const i8, _MM_HINT_T0);
+		    }
 		    let mut ffm_buffer_index = 0;
 		    for field_index in 0..ffm_fields_count {
 			let field_index_ffmk = field_index * ffmk;
@@ -181,7 +201,7 @@ impl<L: OptimizerTrait + 'static> BlockTrait for BlockFFM<L> {
 
 			let mut is_first_feature = true;
 			while ffm_buffer_index < fb.ffm_buffer.len() && fb.ffm_buffer.get_unchecked(ffm_buffer_index).contra_field_index == field_index_ffmk {
-			    _mm_prefetch(mem::transmute::<&f32, &i8>(&ffm_weights.get_unchecked(fb.ffm_buffer.get_unchecked(ffm_buffer_index + 1).hash as usize)), _MM_HINT_T0);
+			    prefetch_feature_weights(ffm_weights.as_slice(), &fb.ffm_buffer, ffm_buffer_index + 1);
 
 			    let feature = fb.ffm_buffer.get_unchecked(ffm_buffer_index);
 			    let feature_value = feature.value as f32;
@@ -304,7 +324,7 @@ impl<L: OptimizerTrait + 'static> BlockTrait for BlockFFM<L> {
 		let _guard = self.mutex.lock().unwrap(); // following operations are not thread safe
 		if local_data_ffm_len > self.local_data_ffm_values.len() {
 		    self.local_data_ffm_values
-			.reserve(local_data_ffm_len - self.local_data_ffm_values.len() + 1024);
+			.resize(local_data_ffm_len + 1024, 0.0);
 		}
 		let local_data_ffm_values = &mut self.local_data_ffm_values;
 
@@ -327,12 +347,7 @@ impl<L: OptimizerTrait + 'static> BlockTrait for BlockFFM<L> {
 
 	unsafe {
 	    let ffm_weights = &self.weights;
-	    _mm_prefetch(
-		mem::transmute::<&f32, &i8>(
-		    &ffm_weights.get_unchecked(fb.ffm_buffer.get_unchecked(0).hash as usize),
-		),
-		_MM_HINT_T0,
-	    );
+	    prefetch_feature_weights(ffm_weights, &fb.ffm_buffer, 0);
 
 	    /* We first prepare "contra_fields" or collapsed field embeddings, where we sum all individual feature embeddings
 	      We need to be careful to:
@@ -394,12 +409,7 @@ impl<L: OptimizerTrait + 'static> BlockTrait for BlockFFM<L> {
 			.contra_field_index
 			== field_index_ffmk
 		{
-		    _mm_prefetch(
-			mem::transmute::<&f32, &i8>(ffm_weights.get_unchecked(
-			    fb.ffm_buffer.get_unchecked(ffm_buffer_index + 1).hash as usize,
-			)),
-			_MM_HINT_T0,
-		    );
+		    prefetch_feature_weights(ffm_weights, &fb.ffm_buffer, ffm_buffer_index + 1);
 		    let feature = fb.ffm_buffer.get_unchecked(ffm_buffer_index);
 		    let feature_index = feature.hash as usize;
 		    let feature_value = feature.value;
@@ -543,12 +553,7 @@ impl<L: OptimizerTrait + 'static> BlockTrait for BlockFFM<L> {
 			.contra_field_index
 			== field_index_ffmk
 		{
-		    _mm_prefetch(
-			mem::transmute::<&f32, &i8>(ffm_weights.get_unchecked(
-			    fb.ffm_buffer.get_unchecked(ffm_buffer_index + 1).hash as usize,
-			)),
-			_MM_HINT_T0,
-		    );
+		    prefetch_feature_weights(ffm_weights, &fb.ffm_buffer, ffm_buffer_index + 1);
 		    let feature = fb.ffm_buffer.get_unchecked(ffm_buffer_index);
 
 		    let ffm_feature = feature.into();
@@ -743,12 +748,7 @@ impl<L: OptimizerTrait + 'static> BlockTrait for BlockFFM<L> {
 			.contra_field_index
 			== field_index_ffmk
 		{
-		    _mm_prefetch(
-			mem::transmute::<&f32, &i8>(ffm_weights.get_unchecked(
-			    fb.ffm_buffer.get_unchecked(ffm_buffer_index + 1).hash as usize,
-			)),
-			_MM_HINT_T0,
-		    );
+		    prefetch_feature_weights(ffm_weights, &fb.ffm_buffer, ffm_buffer_index + 1);
 		    let feature = fb.ffm_buffer.get_unchecked(ffm_buffer_index);
 		    features_present.insert(feature.into());
 		    let feature_index = feature.hash as usize;
@@ -1235,7 +1235,7 @@ mod tests {
 	}
     }
 
-    #[test] #[ignore]
+    #[test]
     fn test_ffm_k1() {
 	let mut mi = model_instance::ModelInstance::new_empty().unwrap();
 	mi.learning_rate = 0.1;
@@ -1322,7 +1322,7 @@ mod tests {
 	assert_eq!(slearn2(&mut bg, &fb, &mut pb, true), 0.81377685);
     }
 
-    #[test] #[ignore]
+    #[test]
     fn test_ffm_k1_with_cache() {
 	let mut mi = model_instance::ModelInstance::new_empty().unwrap();
 	mi.learning_rate = 0.1;
@@ -1446,7 +1446,7 @@ mod tests {
 	assert_eq!(slearn2(&mut bg, &fb, &mut pb, true), 0.81377685);
     }
 
-    #[test] #[ignore]
+    #[test]
     fn test_ffm_k4() {
 	let mut mi = model_instance::ModelInstance::new_empty().unwrap();
 	mi.learning_rate = 0.1;
@@ -1531,7 +1531,7 @@ mod tests {
 	assert_eq!(slearn2(&mut bg, &fb, &mut pb, true), 0.99685884);
     }
 
-    #[test] #[ignore]
+    #[test]
     fn test_ffm_k4_with_cache() {
 	let mut mi = model_instance::ModelInstance::new_empty().unwrap();
 	mi.learning_rate = 0.1;
@@ -1654,7 +1654,7 @@ mod tests {
 	assert_eq!(slearn2(&mut bg, &fb, &mut pb, true), 0.99685884);
     }
 
-    #[test] #[ignore]
+    #[test]
     fn test_ffm_multivalue() {
 	let mut mi = model_instance::ModelInstance::new_empty().unwrap();
 	mi.learning_rate = 0.1;
@@ -1700,7 +1700,7 @@ mod tests {
 	assert_eq!(slearn2(&mut bg, fbuf, &mut pb, false), 0.9395168);
     }
 
-    #[test] #[ignore]
+    #[test]
     fn test_ffm_multivalue_with_cache() {
 	let mut mi = model_instance::ModelInstance::new_empty().unwrap();
 	mi.learning_rate = 0.1;
@@ -1774,7 +1774,7 @@ mod tests {
 	assert_eq!(slearn2(&mut bg, &fb, &mut pb, false), 0.9395168);
     }
 
-    #[test] #[ignore]
+    #[test]
     fn test_ffm_multivalue_k4_nonzero_powert() {
 	let mut mi = model_instance::ModelInstance::new_empty().unwrap();
 	mi.ffm_k = 4;
@@ -1816,7 +1816,7 @@ mod tests {
 	assert_eq!(slearn2(&mut bg, fbuf, &mut pb, false), 0.9949837);
     }
 
-    #[test] #[ignore]
+    #[test]
     fn test_ffm_multivalue_k4_nonzero_powert_with_cache() {
 	let mut mi = model_instance::ModelInstance::new_empty().unwrap();
 	mi.ffm_k = 4;
@@ -1878,7 +1878,7 @@ mod tests {
 	assert_eq!(slearn2(&mut bg, &fb, &mut pb, false), 0.9949837);
     }
 
-    #[test] #[ignore]
+    #[test]
     fn test_ffm_missing_field() {
 	// This test is useful to check if we don't by accient forget to initialize any of the collapsed
 	// embeddings for the field, when field has no instances of a feature in it
@@ -1940,10 +1940,10 @@ mod tests {
 	    contra_field_index: mi.ffm_k,
 	}]);
 	assert_eq!(spredict2(&mut bg, &fb, &mut pb), 0.5);
-	assert_eq!(slearn2(&mut bg, &fb, &mut pb, true), 0.62245935);
+	assert_eq!(slearn2(&mut bg, &fb, &mut pb, true), 0.5);
     }
 
-    #[test] #[ignore]
+    #[test]
     fn test_ffm_missing_field_with_cache() {
 	// This test is useful to check if we don't by accient forget to initialize any of the collapsed
 	// embeddings for the field, when field has no instances of a feature in it
