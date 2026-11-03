@@ -1,0 +1,10 @@
+{
+  "kind": "test_gap",
+  "location": { "repo": "https://github.com/GreatPyreneseDad/fwumious_wabbit.git", "commit": "fea5540cf8ef704585d355c402d03d73f16363a4", "path": "src/block_ffm.rs", "line_start": 1238 },
+  "defect": "All ten block_ffm unit tests carry #[ignore], added when a newer rustc exposed out-of-bounds reads behind unsafe unchecked indexing in the FFM block (upstream issue outbrain-inc/fwumious_wabbit#134). The suite is green only because the tests do not run; run with --ignored they fail. The fix is to make the indexing sound so the tests pass with the #[ignore] attributes removed; the tests' expected values are the contract and must not change.",
+  "severity": "high",
+  "evidence": {
+    "repro": { "workdir": ".", "cmd": "cargo test block_ffm -- --ignored --include-ignored 2>&1 | tail -80", "expect": "stdout_contains", "needle": "test result: FAILED", "timeout_s": 2400 },
+    "notes": "First build pulls intel-mkl-src; about 2 minutes on a GitHub runner. The ten tests are test_ffm_k1 .. test_ffm_missing_field_with_cache in src/block_ffm.rs. A fix that keeps #[ignore] still fails this repro, since --include-ignored runs them anyway."
+  }
+}
