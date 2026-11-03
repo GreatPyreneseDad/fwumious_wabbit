@@ -1,0 +1,21 @@
+{
+  "kind": "correctness",
+  "location": {
+    "repo": "https://github.com/GreatPyreneseDad/fwumious_wabbit.git",
+    "commit": "db90e1c1b457c27213ddac1739bf35672bed65f5",
+    "path": "src/block_ffm.rs",
+    "line_start": 399
+  },
+  "defect": "All ten block_ffm unit tests carry #[ignore] (added 2024-06-04, b3435aa) because a newer rustc exposed out-of-bounds reads behind unsafe unchecked indexing: the look-ahead prefetch get_unchecked(ffm_buffer_index + 1) at src/block_ffm.rs:399 reads one past the end on the last feature, and the same pattern recurs in forward, forward_with_cache and prepare_forward_cache (upstream issue outbrain-inc/fwumious_wabbit#134). Run with --ignored, the test binary aborts. Contract for the fix: make the indexing sound and remove the #[ignore] attributes; the tests' expected values are the contract, with ONE documented exception. test_ffm_missing_field's final assertion (slearn2 on a single middle-field buffer == 0.62245935) contradicts the assertion one line above it (spredict2 on the same buffer, no weight update between == 0.5) and the diagonal exclusion in forward_backward (vv == feature_contra_field_index, since 871d550, 2023-05-31). Upstream history shows the original expectation was 0.5 and was edited to 0.62245935 in b24b617 (2024-04-08, 'le tests'), two months before the tests were ignored. A build may restore that assertion to 0.5; it must not change forward_backward to reproduce the 2024 value, which would reintroduce self-interaction and make forward and forward_backward disagree. No other expected value may change.",
+  "severity": "high",
+  "evidence": {
+    "repro": {
+      "workdir": ".",
+      "cmd": "cargo test block_ffm -- --ignored",
+      "expect": "nonzero_exit",
+      "timeout_s": 1800
+    },
+    "notes": "Supersedes finding 7aa1b509 (same defect; its contract forbade the one test correction the fix requires, and the panel rightly refused a build that made it). Evidence for the exception: git show b24b617 -- src/block_ffm.rs. First build pulls intel-mkl-src; about 2 minutes on a GitHub runner, a few on the judge box with a warm target cache."
+  },
+  "contribution_token": "eyJhbGciOiJFUzI1NiIsInR5cCI6ImJ1aWxkdXAtY29udHJpYnV0aW9uK2p3dCJ9.eyJraW5kIjoiZmluZGluZyIsIm1hbmRhdGUiOiJjbGkiLCJwYXlsb2FkX3NoYTI1NiI6ImZiZmYyYTAzOWYxNTU5ZWI1YTZkMTk3YTMzZTYxOTRmZGU4NjM0NjMwZTJhYWI0NzdmMTc3YTFiZTk2YTZkYzQiLCJzdWIiOiJLVWh3d3lzRE1kQkx1NUdCUmVVRHdoanhxSWRwUHJfbEEyTndwc0ZrbHJ3IiwiaWF0IjoxNzkzNzQ3NjQzLCJqdGkiOiI1YjMxMTliYmZjOWUxYzFmNDY1MDRjNmUifQ.OqeWiZ4lz6RY0VRTQApt8ufHosUQqX6ok3qTPBw-4429B1rY5ZAeg75fLw_vVRubfLAutCl4XO2fmx4iuv-Zew"
+}
