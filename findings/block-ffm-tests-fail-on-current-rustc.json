@@ -1,0 +1,10 @@
+{
+  "kind": "correctness",
+  "location": { "repo": "https://github.com/GreatPyreneseDad/fwumious_wabbit.git", "commit": "b3435aa00a92be8e8e603830c1556b2f66c2ff9c", "path": "src/block_ffm.rs", "line_start": 1239 },
+  "defect": "The block_ffm unit tests fail on a current stable rustc: newer compilers surface out-of-bounds reads behind unsafe unchecked indexing in the FFM block, so cargo test block_ffm exits nonzero and the crate's suite has been red since mid-2024 (upstream issue outbrain-inc/fwumious_wabbit#134). The fix must keep the tests' expected outputs; it is the indexing that is wrong, not the expectations.",
+  "severity": "high",
+  "evidence": {
+    "repro": { "workdir": ".", "cmd": "cargo test block_ffm 2>&1 | tail -40", "expect": "stdout_contains", "needle": "test result: FAILED", "timeout_s": 2400 },
+    "notes": "Full build pulls intel-mkl-src and takes minutes on first run. Upstream issue #134 names the cause: unsafe indexing that a newer rustc now checks. Expect panics or failed assertions inside the test_ffm_* functions."
+  }
+}
