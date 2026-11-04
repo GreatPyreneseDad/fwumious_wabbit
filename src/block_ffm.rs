@@ -485,12 +485,7 @@ impl<L: OptimizerTrait + 'static> BlockTrait for BlockFFM<L> {
 	    let cached_contra_fields = contra_fields;
 
 	    let ffm_weights = &self.weights;
-	    _mm_prefetch(
-		mem::transmute::<&f32, &i8>(
-		    ffm_weights.get_unchecked(fb.ffm_buffer.get_unchecked(0).hash as usize),
-		),
-		_MM_HINT_T0,
-	    );
+	    prefetch_feature_weights(ffm_weights, &fb.ffm_buffer, 0);
 
 	    /* We first prepare "contra_fields" or collapsed field embeddings, where we sum all individual feature embeddings
 	      We need to be careful to:
@@ -698,12 +693,7 @@ impl<L: OptimizerTrait + 'static> BlockTrait for BlockFFM<L> {
 	    features_present.clear();
 
 	    let ffm_weights = &self.weights;
-	    _mm_prefetch(
-		mem::transmute::<&f32, &i8>(
-		    ffm_weights.get_unchecked(fb.ffm_buffer.get_unchecked(0).hash as usize),
-		),
-		_MM_HINT_T0,
-	    );
+	    prefetch_feature_weights(ffm_weights, &fb.ffm_buffer, 0);
 
 	    /* We first prepare "contra_fields" or collapsed field embeddings, where we sum all individual feature embeddings
 	      We need to be careful to:
